@@ -1,13 +1,5 @@
 # 大肥鱼表情素材
 
-按情绪存放图片：
+可选的角色素材目录。表情发送由所使用的 AstrBot 表情插件处理，素材不参与 RSI 的安装与评估。
 
-```text
-happy/       开心
-confused/    疑惑
-sad/         委屈
-shy/         害羞
-sleep/       晚安
-```
-
-放好后通过表情包管理器上传，见 [配置步骤](../../docs/meme-setup.md)。
+项目主线见 [大肥鱼自我迭代](../../README.md)，素材来源见 [SOURCES.md](../../SOURCES.md)。

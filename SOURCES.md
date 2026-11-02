@@ -1,10 +1,8 @@
 # 来源与改编说明
 
-整理日期：2026-10-31。
-
 ## 表情包插件与资源
 
-- 插件：[anka-afk/astrbot_plugin_meme_manager](https://github.com/anka-afk/astrbot_plugin_meme_manager)，本机核对版本 5.2.11。
+- 相关插件：[anka-afk/astrbot_plugin_meme_manager](https://github.com/anka-afk/astrbot_plugin_meme_manager)。
 - 起步图库：[官方表情包1号](https://github.com/anka-afk/astrbot-meme-pack-official-01)，其 `manifest.json` 声明版本 1.0.0、许可 CC-BY-NC-SA-4.0。
 
 ## 上游项目
@@ -16,7 +14,7 @@
 - 上游素材说明备份：[avatars-README.md](third_party/dafeiyu-astrbot/avatars-README.md)
 - 每个下载文件的固定链接、字节数、SHA-256：[sources.json](third_party/dafeiyu-astrbot/sources.json)
 
-本仓库保留用户已有的根目录 LICENSE。上游材料同时保留其贡献者版权及 MIT 许可。上游素材说明称 v3 为用户提供的 ChatGPT 生成图，用于 QQ 机器人头像、立绘及社区二创参考；本次未采用带旧画师条款的 v1/v2 素材，也未将图片标记为 DeepSeek 官方授权素材。
+项目代码使用根目录的 MIT LICENSE，上游材料保留其贡献者版权及许可。上游素材说明称 v3 为用户提供的 ChatGPT 生成图，用于机器人头像、立绘及社区二创参考；本仓库使用该版本素材。
 
 ## 图片映射
 
@@ -31,15 +29,9 @@
 
 ## 人格改编
 
-`prompts/dafeiyu.md` 以用户提供的《大肥鱼-妹妹人设.md》为主稿，适配当前 AstrBot。导出的 `personas/dafeiyu_custom.json` 使用同一正文；早期采用的上游人格保留在 `third_party/` 中供对照。
+`prompts/dafeiyu.md` 结合维护者提供的人格草稿整理、改编，导出的 `personas/dafeiyu_custom.json` 使用同一正文。早期参考的上游人格保留在 `third_party/` 中供对照。
 
-主要调整：
-
-- 保留妹妹版的黏人、撒娇、护短和认真时的反差。
-- 吸收用户提供的《人设.doc》中的群聊语感、引用判断、搜索核对和接梗示例；被怼优先顶回去，闲聊允许装傻和明显荒诞的玩笑答案。
-- 被 @ 必回，夜间也回应；普通闲聊每 3～5 轮配一张表情。
-- 放宽固定字数，适配现有搜索、网页读取、表情包和长期记忆工具。
-- 示例仅作为系统提示词中的风格参考，`begin_dialogs` 留空，避免当成真实共同经历。
+这些文件作为角色示例保留。项目目前专注 RSI 的学习、执行、评估与版本管理。
 
 ## 其他形象检索入口
 

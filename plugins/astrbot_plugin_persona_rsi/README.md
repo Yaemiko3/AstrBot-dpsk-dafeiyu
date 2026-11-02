@@ -1,6 +1,8 @@
-# Persona RSI · 统一自改进
+# 大肥鱼自我迭代 · 技术说明
 
-让大肥鱼根据真实互动，选择修改人格习惯、消息运行参数或行为代码。同一提案可以同时修改三者，经过功能检查和聊天回放后自动生效，统一保存版本并回退。
+少折腾 prompt，让大肥鱼从真实聊天中学习更自然的表达。同一提案可以修改人格习惯、消息运行参数或行为代码，经过功能检查和聊天回放后自动生效，统一保存版本并回退。
+
+[项目介绍](../../README.md) · [接入指南](../../docs/astrbot-setup.md)
 
 ## 0.3 版怎么工作
 
@@ -33,17 +35,17 @@
 
 “不修改”是正常结果。证据不足、判断不通过或调用失败时不会强行生成升级。模型评估只是筛选依据，真实聊天仍可能退步，可随时回退。
 
-固定核心包括妹妹身份、被 @ 必回、嘴硬互怼、认真求助时办事、表情频率、工具事实依据。某个人的专属偏好继续由 LivingMemory 保存。
+角色核心约束集中维护在 [policy.py](policy.py)，每轮评估都会核对。个人的专属偏好继续由 LivingMemory 保存。
 
 ## 安装到本机
 
 从仓库根目录运行：
 
 ```powershell
-python scripts/deploy_persona_rsi.py --core "你的AstrBot核心目录" --enable --provider "deepseek/deepseek-flash"
+python scripts/deploy_persona_rsi.py --core "<AstrBot核心目录>" --enable --provider "<模型提供商ID>"
 ```
 
-重载插件或重启 AstrBot。配置中 `persona_id` 默认 `dafeiyu_custom`。`allowed_sessions` 可指定采样的会话 UMO；默认采样该人格的会话。群聊还会核对当前白名单、会话开关和插件开关。首次启动先保存基础版本并导入历史，达到条件后后台评估。
+重载插件或重启 AstrBot，在 `persona_id` 中填写实际使用的目标人格 ID。`allowed_sessions` 可指定采样的会话 UMO；留空采样该人格的会话。群聊还会核对当前白名单、会话开关和插件开关。首次启动先保存基础版本并导入历史，达到条件后后台评估。
 
 `group_learning_enabled` 开关群聊学习；`group_history_days` 设置1～30天的历史窗口；`excluded_bot_ids` 填其他机器人的账号。自己的回复、已标记的机器人消息自动排除；未知机器人仍需用账号排除。群聊来源为 LivingMemory 的 `conversations.db`，只读访问，需开启 LivingMemory 全量群聊采集。来源缺失时直接对话学习仍可工作。
 
@@ -89,10 +91,10 @@ python scripts/deploy_persona_rsi.py --core "你的AstrBot核心目录" --enable
 可先在隔离状态中使用最近聊天预演（会调用模型，但不改真实人格）：
 
 ```powershell
-python scripts/preview_persona_rsi.py --core "你的AstrBot核心目录" --turns 40
+python scripts/preview_persona_rsi.py --core "<AstrBot核心目录>" --provider "<模型提供商ID>" --persona "<目标人格ID>" --turns 40
 
 # 群体学习预演，可重复 --group-session 对照多个群
-python scripts/preview_persona_rsi.py --core "你的AstrBot核心目录" --group-session "平台ID:GroupMessage:群号"
+python scripts/preview_persona_rsi.py --core "<AstrBot核心目录>" --provider "<模型提供商ID>" --persona "<目标人格ID>" --group-session "<会话UMO>"
 ```
 
 预演从 LivingMemory 配对相邻文字消息，仅作启动检查；正式运行采用本插件在同一事件中捕获的请求/回复，配对更准确。

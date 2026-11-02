@@ -1,71 +1,83 @@
-# AstrBot · DeepSeek 鲸鱼娘
+# 大肥鱼自我迭代 · Dafeiyu RSI
 
-给自己的 QQ 机器人准备的人格与形象素材仓库，适用于已接通 DeepSeek 的 AstrBot。当前使用「大肥鱼」妹妹版群聊人格：被 @ 必回，普通闲聊每 3～5 轮配一张表情，使用现有 SnowLuma / OneBot 连接。
+> 找 prompt 太难？不如让大肥鱼从聊天里，自己学会怎么聊天。
 
-<img src="assets/avatars/avatar-wave.png" alt="大肥鱼招手头像" width="320">
+<img src="assets/avatars/avatar-wave.png" alt="大肥鱼" width="180" align="right">
 
-这是个人二创配置，非 DeepSeek 官方角色或官方产品。人格以用户提供的妹妹版为主稿，图片选自 [whyever77/dafeiyu-astrbot](https://github.com/whyever77/dafeiyu-astrbot) 公开的 v3 素材；来源与许可见 [SOURCES.md](SOURCES.md)。
+人设找了一堆，聊天还是像客服。今天加一句“不要说教”，明天补一句“别解释笑点”，规则越写越长，接话还是差点意思。
 
-## 立即使用
+**大肥鱼 RSI 想把这份反复调教的工作，交还给大肥鱼自己。**
 
-1. 打开 AstrBot 管理面板，进入「人格设定」，点击右上角「创建人格」旁的 **向下箭头 `⌄`**，在菜单里选择「导入人格」。部分版本入口位于「扩展功能」下。
-2. 选择本仓库的 **[personas/dafeiyu_custom.json](personas/dafeiyu_custom.json)**。
-3. 在机器人实际使用的配置文件中，把默认人格设为 `dafeiyu_custom`；或者通过「自定义规则」只指定给某个 QQ 私聊或群聊。
-4. 在目标 QQ 会话中发送 `/new`，再发送「大肥鱼，今天有点累」进行测试。改过唤醒前缀时使用对应前缀。
-5. 想更换 QQ 头像，可在 QQ 客户端手动选择 [avatar-wave.png](assets/avatars/avatar-wave.png)。人格导入不会自动更换账号头像。
+给她一个人格起点，让她观察真人如何接话、回看自己的表现，再尝试调整表达习惯、聊天参数和行为代码。改完先对照，再决定要不要留下。
 
-详细步骤与排查方法见 [导入说明](docs/astrbot-setup.md)。没有导入按钮的版本，可新建人格并将 [人设正文](prompts/dafeiyu.md) 全文粘贴到系统提示词。
+**少折腾 prompt，多和她聊天。让拟人感在真实互动里慢慢打磨。**
 
-## 聊天表情包
+[开始使用](docs/astrbot-setup.md) · [工作原理与配置](plugins/astrbot_plugin_persona_rsi/README.md) · [核心代码](plugins/astrbot_plugin_persona_rsi/)
 
-使用「表情包管理器」，按 [配置步骤](docs/meme-setup.md) 导入并绑定大肥鱼。自定义图片放在 `assets/memes/`。
+## 她会自己学什么？
 
-## 形象素材
+她既学习自己参与过的对话，也旁观群友之间的交流。从不同人的真实回复中找共同习惯，把适合的表达带到新的聊天场景里。
 
-| 招手头像 | 抱鲸鱼 | 全身站姿 | 夜间陪伴 |
-| --- | --- | --- | --- |
-| ![招手](assets/avatars/avatar-wave.png) | ![抱鲸鱼](assets/avatars/portrait-whale.png) | ![站姿](assets/avatars/standing.png) | ![夜间](assets/avatars/evening.png) |
+| 聊天里出现的现象 | 她可以尝试的改进 |
+| --- | --- |
+| 每次接完梗，还要解释一句为什么好笑 | 调整表达习惯，接住就停 |
+| 大家在轻松接龙，她却认真分析每句话 | 学习在合适的语境下复读、接梗 |
+| 对方还在连续补充，她已经抢先回答 | 调整等待时间，合并连续消息 |
+| 问的是刚聊过的角色，她却理解成自己 | 改进上下文选择，接准话题里的指代 |
 
-上游将这批素材标注为用户提供的 ChatGPT 生成图。这里保留原图，未裁剪或修改。它们是社区二创版本，不代表唯一或最初的鲸鱼娘设计。
+这些是学习方向的例子，实际修改由聊天证据和评估结果决定。
 
-## 修改自己的人格
+## 不用每次都重写人设
 
-人格自动迭代项目已放在 [Persona RSI](plugins/astrbot_plugin_persona_rsi/README.md)：固定核心设定，按真实对话提出聊天习惯修改，通过审查和回复对照后写入 AstrBot 人格，支持版本查看与回退。
+大肥鱼 RSI 把三类改动放进同一条流程，让她根据问题选择改哪里：
 
-日常编辑 **`prompts/dafeiyu.md`**，随后在仓库目录执行：
+- **人格习惯**：语气、接梗、长短、亲近表达和话题衔接。
+- **运行参数**：消息等待、上下文数量与时效、发送延迟。
+- **行为代码**：上下文选择、连续补充合并和聊天节奏的处理逻辑。
 
-```powershell
-python scripts/build_persona.py
-```
+一次改进可以同时涉及几层，采用后保存为一个版本，也能一起回退。目前代码迭代覆盖独立的消息行为模块。
 
-脚本使用 Python 3 标准库，不需要安装依赖，会生成 `personas/dafeiyu_custom.json`。检查导出是否与正文一致：
+## 怎么越聊越自然？
 
-```powershell
-python scripts/build_persona.py --check
-```
+**观察真实聊天 → 提出改进 → 实现候选版本 → 功能检查与聊天回放 → 自动采用 → 继续观察**
 
-在 AstrBot 中编辑现有人格，或重新导入生成的 JSON。当前 AstrBot 遇到同名导入会创建带后缀的新人格，重新导入后应确认会话选中了最新版本。Git 提交不会自动同步到 AstrBot。
+她会保留一部分对话不参与提案，用旧版本和候选版本分别接话，再比较谁更贴合语境。真人回复可以作为参考，帮助她学习自然的表达方式。
 
-## 目录
+核心设定保持稳定，日常习惯逐步调整。每次改变都有依据、对照结果和版本记录，你能看到她改了什么，也能随时退回上一版。
+
+这里的 RSI 是对人格、参数和行为代码的持续迭代。目标是减少手动调 prompt 的负担；实际进步仍需要通过聊天验证。
+
+## 开始使用
+
+当前以 **AstrBot 插件**实现，已在 AstrBot 4.29.3 接口上验证。
+
+1. 准备一个能够正常聊天的 AstrBot 实例和已配置的模型。
+2. 安装本仓库中的 `astrbot_plugin_persona_rsi`，指定目标人格和评估模型。
+3. 想让她旁观群友交流，接入 LivingMemory 的群聊采集。
+4. 正常聊天，让后台积累样本、提出并评估改进。
+
+完整步骤见 [RSI 接入指南](docs/astrbot-setup.md)。后台评估会使用已配置模型的 API 额度。
+
+| 指令 | 看看她在做什么 |
+| --- | --- |
+| `/prsi status` | 学习进度与最近结果 |
+| `/prsi habits` | 已经采用的表达习惯 |
+| `/prsi runtime` | 当前参数和行为代码版本 |
+| `/prsi history` | 每次提案与评估结果 |
+| `/prsi rollback` | 整体回退到上一版 |
+
+## 项目结构
 
 ```text
-assets/avatars/                 4 张形象素材
-assets/memes/                   自定义表情素材
-prompts/dafeiyu.md              日常维护的人格正文
-personas/dafeiyu_custom.json    可导入 AstrBot 的导出文件
-scripts/build_persona.py        导出 / 一致性检查工具
-docs/astrbot-setup.md           接入与测试说明
-docs/meme-setup.md              表情包导入与绑定
-third_party/dafeiyu-astrbot/    上游原文、许可与来源哈希
-SOURCES.md                     二创说明与素材出处
+plugins/astrbot_plugin_persona_rsi/  统一提案、执行、评估与运行时
+scripts/deploy_persona_rsi.py        部署到 AstrBot
+scripts/preview_persona_rsi.py       用历史聊天预演一次改进
+tests/                             人格、参数、代码与消息流程测试
+docs/astrbot-setup.md               RSI 接入指南
 ```
 
-## 当前能力
+想参与开发，可以从 [行为模块](plugins/astrbot_plugin_persona_rsi/behavior.py)、[统一提案](plugins/astrbot_plugin_persona_rsi/unified.py) 和 [评估流程](plugins/astrbot_plugin_persona_rsi/engine.py) 看起。欢迎改进学习样本、回放评估，以及能让接话更自然的行为逻辑。
 
-[Persona RSI](plugins/astrbot_plugin_persona_rsi/README.md) 将人格习惯、消息运行参数和行为代码纳入同一自改进流程。结合实际回复反馈与群友交流提出改动，执行功能检查和真人回复回放，统一生效与回退；固定妹妹身份等核心设定。
+## 许可与素材
 
-LivingMemory 每 10 轮整理对话时会提取有依据的互动反馈；明确的称呼、语气偏好和重要纠正也可由人格主动记忆。再次遇到相关话题时，结合召回的经验调整回应。后台复盘模板见 [memory_system_prompt_with_persona.txt](prompts/livingmemory/memory_system_prompt_with_persona.txt)，部署在 LivingMemory 数据目录的同名 `prompts/` 文件中。
-
-这一版负责角色身份、聊天语气、私聊与群聊分寸。需要 AstrBot 已配置对话模型。长期记忆、主动发消息、TTS、图片理解和设备操作需要各自的插件、模型或工具；人格文本不能自行启用这些功能。
-
-现有 `.git` 和根目录 MIT `LICENSE` 已保留。上游贡献者的许可位于 [third_party/dafeiyu-astrbot/LICENSE](third_party/dafeiyu-astrbot/LICENSE)。不要把 API Key、QQ 登录信息、AstrBot 数据库或私人聊天记录提交到仓库。
+项目代码使用 [MIT License](LICENSE)。大肥鱼形象及上游材料的来源、改编与许可见 [SOURCES.md](SOURCES.md)。
