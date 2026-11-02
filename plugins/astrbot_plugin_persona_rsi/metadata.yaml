@@ -1,0 +1,6 @@
+name: astrbot_plugin_persona_rsi
+display_name: Persona RSI
+author: dafeiyu
+version: 0.3.0
+desc: 统一迭代人格、消息运行参数和行为代码，基于真实聊天验证、版本化生效与回退。
+astrbot_version: ">=4.29.3,<5.0.0"

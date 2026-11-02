@@ -1,0 +1,1 @@
+"""Persona RSI for AstrBot."""

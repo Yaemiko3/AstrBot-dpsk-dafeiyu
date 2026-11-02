@@ -1,0 +1,30 @@
+# Local credentials and private runtime data
+.env
+.env.*
+!.env.example
+config.local.*
+*.local.json
+*.key
+*.pem
+data/
+runtime/
+logs/
+backups/
+private/
+*.log
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+
+# Python and editors
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini

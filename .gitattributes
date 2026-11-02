@@ -1,0 +1,9 @@
+* text=auto
+*.md text eol=lf
+*.json text eol=lf
+*.py text eol=lf
+*.png binary
+# Preserve downloaded source bytes for provenance hashes.
+third_party/dafeiyu-astrbot/LICENSE -text
+third_party/dafeiyu-astrbot/avatars-README.md -text
+third_party/dafeiyu-astrbot/persona-original.md -text

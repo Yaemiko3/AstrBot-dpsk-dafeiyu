@@ -1,0 +1,12 @@
+{
+  "enabled": {"description": "启用人格 RSI", "type": "bool", "default": false},
+  "persona_id": {"description": "迭代目标人格 ID", "type": "string", "default": "dafeiyu_custom"},
+  "provider_id": {"description": "提案与回复对照模型", "type": "string", "default": "", "_special": "select_provider"},
+  "review_provider_id": {"description": "独立审查模型，留空复用上述模型", "type": "string", "default": "", "_special": "select_provider"},
+  "minimum_turns": {"description": "每轮最少新对话数（10～60）", "type": "int", "default": 40},
+  "cooldown_hours": {"description": "自动迭代间隔（小时，至少0.25）", "type": "float", "default": 6},
+  "allowed_sessions": {"description": "采样会话 UMO 列表，空列表表示该人格所有会话", "type": "list", "default": []},
+  "group_learning_enabled": {"description": "从 LivingMemory 的群友原始对话学习群体表达习惯", "type": "bool", "default": true},
+  "group_history_days": {"description": "群聊历史学习窗口（1～30天）", "type": "int", "default": 7},
+  "excluded_bot_ids": {"description": "其他机器人账号 ID，不计入真人学习样本；自己的回复自动排除", "type": "list", "default": []}
+}

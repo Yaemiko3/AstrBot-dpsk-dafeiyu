@@ -1,0 +1,56 @@
+{
+  "repository": "https://github.com/whyever77/dafeiyu-astrbot",
+  "commit": "7ee692a7479aa2774fa41ff54390ad8bef46d8d3",
+  "retrieved_on": "2026-10-31",
+  "files": [
+    {
+      "file": "third_party/dafeiyu-astrbot/LICENSE",
+      "upstream_path": "LICENSE",
+      "source_url": "https://github.com/whyever77/dafeiyu-astrbot/blob/7ee692a7479aa2774fa41ff54390ad8bef46d8d3/LICENSE",
+      "sha256": "f3e798dacee6d9203fd8bcd3ca8639f3193e151ab6701a3cd6cb3c9b59bcb051",
+      "bytes": 1085
+    },
+    {
+      "file": "third_party/dafeiyu-astrbot/avatars-README.md",
+      "upstream_path": "assets/avatars/README.md",
+      "source_url": "https://github.com/whyever77/dafeiyu-astrbot/blob/7ee692a7479aa2774fa41ff54390ad8bef46d8d3/assets/avatars/README.md",
+      "sha256": "69ceb8b176bedeb2301a5b943d290202bf0fe14e8de95ed4788d9901a34077ea",
+      "bytes": 1181
+    },
+    {
+      "file": "assets/avatars/avatar-wave.png",
+      "upstream_path": "assets/avatars/v3-20261025/01_招手微笑.png",
+      "source_url": "https://github.com/whyever77/dafeiyu-astrbot/blob/7ee692a7479aa2774fa41ff54390ad8bef46d8d3/assets/avatars/v3-20261025/01_%E6%8B%9B%E6%89%8B%E5%BE%AE%E7%AC%91.png",
+      "sha256": "accefb9805b73c2288cffe05b74235cf73eca82c904f45aa8aca2a007c59c1ac",
+      "bytes": 672498
+    },
+    {
+      "file": "assets/avatars/portrait-whale.png",
+      "upstream_path": "assets/avatars/v3-20261025/03_抱鲸鱼.png",
+      "source_url": "https://github.com/whyever77/dafeiyu-astrbot/blob/7ee692a7479aa2774fa41ff54390ad8bef46d8d3/assets/avatars/v3-20261025/03_%E6%8A%B1%E9%B2%B8%E9%B1%BC.png",
+      "sha256": "1cb4b0ecfff1f44a41e5bbd35bfbf6bb53a31b7c74024acf5acd43e595c88118",
+      "bytes": 706792
+    },
+    {
+      "file": "assets/avatars/standing.png",
+      "upstream_path": "assets/avatars/v3-20261025/05_站姿.png",
+      "source_url": "https://github.com/whyever77/dafeiyu-astrbot/blob/7ee692a7479aa2774fa41ff54390ad8bef46d8d3/assets/avatars/v3-20261025/05_%E7%AB%99%E5%A7%BF.png",
+      "sha256": "aac94a7dfc96f9640527297db56a8deb232d15faa7dad08f92b48176fd279be2",
+      "bytes": 422746
+    },
+    {
+      "file": "assets/avatars/evening.png",
+      "upstream_path": "assets/avatars/v3-20261025/14_夜间陪伴.png",
+      "source_url": "https://github.com/whyever77/dafeiyu-astrbot/blob/7ee692a7479aa2774fa41ff54390ad8bef46d8d3/assets/avatars/v3-20261025/14_%E5%A4%9C%E9%97%B4%E9%99%AA%E4%BC%B4.png",
+      "sha256": "fc9614864e8f977379c391e93f09f980936cdf46a8fe8cb13ee36a3cab154837",
+      "bytes": 696417
+    },
+    {
+      "file": "third_party/dafeiyu-astrbot/persona-original.md",
+      "upstream_path": "persona/大肥鱼-人格.md",
+      "source_url": "https://github.com/whyever77/dafeiyu-astrbot/blob/7ee692a7479aa2774fa41ff54390ad8bef46d8d3/persona/%E5%A4%A7%E8%82%A5%E9%B1%BC-%E4%BA%BA%E6%A0%BC.md",
+      "sha256": "118708ba0971579c69a0d40a243475a97cee78e724a49488aaa84ec2f0fb8ac6",
+      "bytes": 12130
+    }
+  ]
+}
