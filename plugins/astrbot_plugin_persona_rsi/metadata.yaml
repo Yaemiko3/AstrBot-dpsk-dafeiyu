@@ -1,6 +1,6 @@
 name: astrbot_plugin_persona_rsi
 display_name: 大肥鱼自我迭代
 author: dafeiyu
-version: 0.3.0
+version: 0.3.1
 desc: 少折腾 prompt，让大肥鱼从真实聊天中学习拟人表达，自主迭代人格、参数与消息行为。
 astrbot_version: ">=4.29.3,<5.0.0"

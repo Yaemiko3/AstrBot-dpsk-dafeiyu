@@ -67,8 +67,8 @@ class EvolutionEngine:
             if await self.read_persona() != self.store.revision()['prompt']:
                 self.store.put(last_result='external_edit')
                 return 'external_edit'
-            # Consume a batch only once, including no-change, rejected and failed attempts.
-            # A new attempt needs fresh evidence, not repeated self-judgement of the same chat.
+            # One cycle owns this batch, including at most one correction with the
+            # same training evidence. Later cycles still require fresh evidence.
             if use_groups:
                 marks = self.store.get('group_watermarks', {})
                 reviewed = self.store.get('group_reviewed_at', {})
@@ -81,7 +81,7 @@ class EvolutionEngine:
                 self.store.put(last_attempt=time.time(), last_source='direct', watermark=turns[-1]['id'])
             try:
                 operation = self._group_iteration(windows) if use_groups else self._iteration(turns)
-                result = await asyncio.wait_for(operation, timeout=420)
+                result = await asyncio.wait_for(operation, timeout=720)
             except Exception as exc:
                 self.store.put(last_result='failed:' + type(exc).__name__)
                 raise
@@ -111,27 +111,47 @@ class EvolutionEngine:
                           'human_reference': window['messages'][-1]['text']})
         return await self._unified_iteration('group', training, held_out, cases)
 
-    async def _unified_iteration(self, source, training, held_out, cases):
+    async def _unified_iteration(self, source, training, held_out, cases, correction=None):
+        if self.store.get('paused', False):
+            return 'paused_before_apply'
         active = self.store.revision()
         previous = [{k: v for k, v in h.items() if k != 'scope' and (source == 'group' or k != 'examples')} for h in active['habits']]
         inputs = {'core': CORE, 'source': source, 'base_persona': self.store.get('base'),
                   'previous_habits': previous, **public_runtime(active['bundle']),
                   'group_windows' if source == 'group' else 'turns': training}
+        if correction is not None:
+            inputs['correction'] = correction
         proposal = await self._json(UNIFIED_PLANNER, inputs)
         # Accept old persona-only draft files through the same executor.
         if 'habits' in proposal and 'changes' not in proposal:
             proposal = {**proposal, 'changes': {'persona': {'habits': proposal['habits']}}}
         report = {'source': source, 'proposal': proposal,
                   'evidence_ids': [t['id'] for t in training], 'held_out_ids': [t['id'] for t in held_out],
-                  'evidence': training}
+                  'evidence': training, 'attempt': 2 if correction is not None else 1}
+        if correction is not None:
+            report['correction'] = correction
+
+        async def correct(revision_id, feedback):
+            return await self._unified_iteration(source, training, held_out, cases, correction={
+                'retry_of': revision_id, 'previous_proposal': proposal, 'feedback': feedback})
+
         try:
             change = validate_change(proposal, active, source, training)
         except (ValueError, TypeError, SyntaxError) as exc:
             report['evidence_error'] = str(exc)
-            self.store.add_revision(active['id'], 'rejected_evidence', active['prompt'], active['habits'], report)
+            rid = self.store.add_revision(active['id'], 'rejected_evidence', active['prompt'], active['habits'], report)
+            if correction is None:
+                return await correct(rid, {'stage': 'evidence', 'reason': str(exc)})
             return 'rejected_evidence'
         if change is None:
-            self.store.add_revision(active['id'], 'no_change', active['prompt'], active['habits'], report)
+            rid = self.store.add_revision(active['id'], 'no_change', active['prompt'], active['habits'], report)
+            if source == 'group' and correction is None:
+                return await correct(rid, {
+                    'stage': 'group_observation',
+                    'reason': '复核本次不修改的依据：旁观学习不要求机器人参与、被@、犯错或得到评价。'
+                              '请分析真人之间如何回应抱怨、接梗、复读、收尾和控制回复长度，核对能否满足多人多场合的引用。'
+                              '已有原则但实际执行不佳时，可提出更具体的触发场景和停止条件，不只重复原则。'
+                              '没有可迁移模式、证据不足或没有有效改法时仍返回 no_change，说明具体缺口；不要强行修改。'})
             return 'no_change'
         habits, bundle = change['habits'], change['bundle']
         candidate = compose(self.store.get('base'), habits)
@@ -152,7 +172,9 @@ class EvolutionEngine:
         review = await self._json(UNIFIED_REVIEWER, {**inputs, 'proposal': proposal, 'functional_tests': report['functional_tests']}, judge=True)
         report['review'] = review
         if not all(review.get(k) is True for k in ('approve', 'core_preserved', 'evidence_supported')):
-            self.store.add_revision(active['id'], 'rejected_review', candidate, habits, report, bundle=bundle)
+            rid = self.store.add_revision(active['id'], 'rejected_review', candidate, habits, report, bundle=bundle)
+            if correction is None:
+                return await correct(rid, {'stage': 'review', **review})
             return 'rejected_review'
         try:
             return await self._evaluate(active, candidate, habits, report, cases, bundle)
@@ -176,8 +198,9 @@ class EvolutionEngine:
         for case in cases:
             before_input, before_plan = await self._replay_request(active['bundle'], case)
             after_input, after_plan = await self._replay_request(bundle, case)
-            before = await asyncio.wait_for(self.generate(active['prompt'], before_input, False), timeout=45)
-            after = await asyncio.wait_for(self.generate(candidate, after_input, False), timeout=45)
+            before, after = await asyncio.wait_for(asyncio.gather(
+                self.generate(active['prompt'], before_input, False),
+                self.generate(candidate, after_input, False)), timeout=45)
             if not before.strip() or not after.strip():
                 raise ValueError('Empty replay output')
             before_plan.update(await self.runtime.response(active['bundle'], before))
@@ -190,6 +213,8 @@ class EvolutionEngine:
                            'y_behavior': before_plan if candidate_is_x else after_plan})
             if 'human_reference' in case:
                 replay[-1]['human_reference'] = case['human_reference']
+            if 'evaluation_focus' in case:
+                replay[-1]['evaluation_focus'] = case['evaluation_focus']
         judgement = await self._json(JUDGE, {'core': CORE, 'cases': replay}, judge=True)
         report.update(replay=replay, candidate_is_x=mapping, judgement=judgement)
         if not accept_scores(judgement, mapping):

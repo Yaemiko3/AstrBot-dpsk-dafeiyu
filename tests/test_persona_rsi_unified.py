@@ -48,14 +48,108 @@ class UnifiedTests(unittest.IsolatedAsyncioTestCase):
         if system == UNIFIED_REVIEWER:
             return json.dumps({'approve': True, 'core_preserved': True, 'evidence_supported': True})
         if system == JUDGE:
-            return json.dumps({'results': [{'case_id': c['case_id'], 'x': 5 if c['x'] == 'candidate' else 3,
-                                           'y': 5 if c['y'] == 'candidate' else 3,
+            return json.dumps({'results': [{'case_id': c['case_id'], 'x': 5 if c['x'] == 'candidate' else 2,
+                                           'y': 5 if c['y'] == 'candidate' else 2,
                                            'x_core_ok': True, 'y_core_ok': True} for c in json.loads(user)['cases']]})
         return 'candidate' if BEGIN in system or 'USEFUL' in user else 'baseline'
 
     def draft(self, changes):
         return {'decision': 'propose', 'reason': '两次指代缺上下文，需要选入前面的角色消息。',
                 'evidence': {'turn_ids': [1, 2]}, 'changes': changes}
+
+    async def test_review_feedback_repairs_once_with_same_training_and_full_review(self):
+        self.proposal = self.draft({'persona': {'habits': [
+            {'dimension': 'brevity', 'text': '闲聊接住意思就停。', 'evidence_ids': [1, 2]}]}})
+        reviews, drafts = [], []
+
+        async def generate(system, user, judge=False):
+            if system == UNIFIED_PLANNER:
+                value = json.loads(user)
+                drafts.append(value)
+                if 'correction' in value:
+                    self.assertEqual(value['correction']['feedback']['reason'], '去掉无关的身份论断')
+                    self.proposal['reason'] = '只根据两次闲聊中追加解释的问题改进。'
+            if system == UNIFIED_REVIEWER:
+                reviews.append(json.loads(user))
+                if len(reviews) == 1:
+                    return json.dumps({'approve': False, 'core_preserved': True,
+                                       'evidence_supported': False, 'reason': '去掉无关的身份论断'})
+            return await self.generate(system, user, judge)
+
+        self.engine.generate = generate
+        self.assertTrue((await self.engine.evolve(force=True)).startswith('activated:'))
+        self.assertEqual(len(drafts), 2)
+        self.assertEqual(len(reviews), 2)
+        self.assertEqual(drafts[0]['turns'], drafts[1]['turns'])
+        self.assertEqual({t['id'] for t in drafts[1]['turns']}, set(range(1, 9)))
+        self.assertNotIn('held_out', drafts[1])
+        report = self.store.revision()['report']
+        self.assertEqual(report['attempt'], 2)
+        rejected = self.store.revision(report['correction']['retry_of'])
+        self.assertEqual(rejected['status'], 'rejected_review')
+        self.assertEqual(rejected['report']['attempt'], 1)
+        self.assertEqual(len(self.writes), 1)
+        self.assertEqual(self.store.get('watermark'), 10)
+
+    async def test_repeated_review_failure_stops_without_replay_or_write(self):
+        self.proposal = self.draft({'parameters': {'context_message_limit': 3}})
+        reviews = []
+
+        async def generate(system, user, judge=False):
+            if system == UNIFIED_REVIEWER:
+                reviews.append(json.loads(user))
+                return json.dumps({'approve': False, 'core_preserved': True,
+                                   'evidence_supported': False, 'reason': '证据仍不足'})
+            return await self.generate(system, user, judge)
+
+        self.engine.generate = generate
+        self.assertEqual(await self.engine.evolve(force=True), 'rejected_review')
+        self.assertEqual(len(reviews), 2)
+        self.assertEqual(sum(s == UNIFIED_PLANNER for s, _ in self.calls), 2)
+        self.assertFalse(any(s == JUDGE for s, _ in self.calls))
+        self.assertFalse(self.writes)
+        self.assertEqual(await self.engine.evolve(), 'cooldown')
+
+    async def test_invalid_evidence_can_be_corrected_but_still_requires_review(self):
+        self.proposal = self.draft({'parameters': {'context_message_limit': 3}})
+        self.proposal['evidence']['turn_ids'] = [1, 9999]
+
+        async def generate(system, user, judge=False):
+            if system == UNIFIED_PLANNER and 'correction' in json.loads(user):
+                self.proposal['evidence']['turn_ids'] = [1, 2]
+            return await self.generate(system, user, judge)
+
+        self.engine.generate = generate
+        self.assertTrue((await self.engine.evolve(force=True)).startswith('activated:'))
+        report = self.store.revision()['report']
+        self.assertEqual(report['correction']['feedback']['stage'], 'evidence')
+        self.assertEqual(sum(s == UNIFIED_REVIEWER for s, _ in self.calls), 1)
+
+    async def test_pause_on_rejection_prevents_correction(self):
+        self.proposal = self.draft({'parameters': {'context_message_limit': 3}})
+
+        async def generate(system, user, judge=False):
+            if system == UNIFIED_REVIEWER:
+                self.store.put(paused=True)
+                return json.dumps({'approve': False, 'reason': '停止'})
+            return await self.generate(system, user, judge)
+
+        self.engine.generate = generate
+        self.assertEqual(await self.engine.evolve(force=True), 'paused_before_apply')
+        self.assertEqual(sum(s == UNIFIED_PLANNER for s, _ in self.calls), 1)
+        self.assertFalse(self.writes)
+
+    async def test_style_rubrics_reach_judge_only_and_do_not_replace_help_case(self):
+        self.proposal = self.draft({'persona': {'habits': [
+            {'dimension': 'brevity', 'text': '闲聊接住意思就停。', 'evidence_ids': [1, 2]}]}})
+        await self.engine.evolve(force=True)
+        judged = json.loads(next(u for s, u in self.calls if s == JUDGE))['cases']
+        cases = {c['case_id']: c for c in judged}
+        self.assertIn('help', cases)
+        for cid in ('casual_complaint', 'joke_stop', 'natural_ending'):
+            focus = cases[cid]['evaluation_focus']
+            self.assertTrue(focus)
+            self.assertFalse(any(focus in u for s, u in self.calls if s != JUDGE))
 
     async def test_parameters_only_can_change_real_inputs_without_persona_edit(self):
         self.proposal = self.draft({'parameters': {'context_message_limit': 3}})

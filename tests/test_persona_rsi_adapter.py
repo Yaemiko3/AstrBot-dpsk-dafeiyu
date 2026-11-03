@@ -138,6 +138,27 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.plugin.store.get('group_watermarks'), {'one': 456})
         self.assertEqual(self.plugin.store.get('last_attempt'), 456)
 
+    async def test_correction_upgrade_preserves_cursors_and_pause_and_runs_once(self):
+        self.plugin.store.put(workflow_revision='old', watermark=123,
+                              group_watermarks={'one': 456}, last_attempt=789, paused=True)
+        active = self.plugin.store.get('active')
+        async def restart():
+            context = self.plugin.context
+            await self.plugin.terminate()
+            self.plugin = PersonaRSI(context, {'enabled': True, 'provider_id': 'test'})
+            with patch('astrbot_plugin_persona_rsi.main.StarTools.get_data_dir', return_value=Path(self.temp.name)):
+                await self.plugin.initialize()
+        await restart()
+        self.assertEqual(self.plugin.store.get('workflow_revision'), 'correction-v1')
+        self.assertEqual(self.plugin.store.get('last_attempt'), 0)
+        self.assertEqual(self.plugin.store.get('active'), active)
+        self.assertEqual(self.plugin.store.get('watermark'), 123)
+        self.assertEqual(self.plugin.store.get('group_watermarks'), {'one': 456})
+        self.assertTrue(self.plugin.store.get('paused'))
+        self.plugin.store.put(last_attempt=999)
+        await restart()
+        self.assertEqual(self.plugin.store.get('last_attempt'), 999)
+
     async def test_same_sender_followup_is_merged_only_after_reply_send(self):
         active = self.plugin.store.revision()
         bundle = active['bundle']

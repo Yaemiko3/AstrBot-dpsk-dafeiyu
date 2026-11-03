@@ -228,6 +228,53 @@ class GroupTests(unittest.IsolatedAsyncioTestCase):
         planner = json.loads(next(u for s, u, _ in model.calls if s == PLANNER))
         self.assertEqual(planner['previous_habits'][0]['text'], habits[0]['text'])
 
+    async def test_group_no_change_is_reconsidered_once_without_forcing_adoption(self):
+        seed(self.store)
+        model = FakeModels()
+        drafts, writes = [], []
+        async def read(): return 'base'
+        async def write(value): writes.append(value)
+        async def generate(system, user, judge=False):
+            if system == GROUP_PLANNER:
+                drafts.append(json.loads(user))
+                return json.dumps({'decision': 'no_change', 'reason': '实际引用不足三人三个场合'})
+            return await model(system, user, judge)
+        engine = EvolutionEngine(self.store, generate, read, write)
+        await engine.initialize()
+        self.assertEqual(await engine.evolve(force=True), 'no_change')
+        self.assertEqual(len(drafts), 2)
+        self.assertEqual(drafts[0]['group_windows'], drafts[1]['group_windows'])
+        self.assertEqual(drafts[1]['correction']['feedback']['stage'], 'group_observation')
+        self.assertFalse(writes)
+        self.assertFalse(model.calls)
+        self.assertEqual(group_batch(self.store), [])
+
+    async def test_group_reconsideration_can_learn_without_bot_participation(self):
+        seed(self.store)
+        live, drafts = 'base', []
+        model = FakeModels()
+        async def read(): return live
+        async def write(value):
+            nonlocal live
+            live = value
+        async def generate(system, user, judge=False):
+            if system == GROUP_PLANNER:
+                value = json.loads(user)
+                drafts.append(value)
+                if 'correction' not in value:
+                    return json.dumps({'decision': 'no_change', 'reason': '机器人未参与'})
+                return json.dumps(proposal_for(value['group_windows']))
+            return await model(system, user, judge)
+        engine = EvolutionEngine(self.store, generate, read, write)
+        await engine.initialize()
+        self.assertTrue((await engine.evolve(force=True)).startswith('activated:'))
+        report = self.store.revision()['report']
+        self.assertEqual(report['attempt'], 2)
+        self.assertEqual(len(drafts), 2)
+        self.assertTrue(report['review']['approve'])
+        self.assertFalse(set(report['evidence_ids']) & set(report['held_out_ids']))
+        self.assertIn('复读', live)
+
     async def test_two_group_batch_checks_target_scope_on_core_cases_and_can_reject(self):
         seed(self.store)
         seed(self.store, OTHER, 100)
@@ -249,7 +296,7 @@ class GroupTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(writes)
         report = self.store.revision(self.store.history()[0]['id'])['report']
         self.assertEqual(len(report['held_out_ids']), 2)
-        self.assertEqual(len(report['replay']), 6)
+        self.assertEqual(len(report['replay']), 9)
         help_case = next(c for c in report['replay'] if c['case_id'] == 'help')
         self.assertIn('candidate', (help_case['x'], help_case['y']))
 

@@ -79,7 +79,7 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((Path(self.temp.name) / 'active_persona.md').read_text(encoding='utf-8'), self.live)
         report = self.store.revision()['report']
         self.assertFalse(set(report['evidence_ids']) & set(report['held_out_ids']))
-        self.assertEqual(len(report['replay']), 6)
+        self.assertEqual(len(report['replay']), 9)
         self.assertEqual(await self.engine.evolve(force=True), 'collecting:0/10')
 
     async def test_reviewer_rejection_never_writes(self):
@@ -167,6 +167,18 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PolicyTests(unittest.TestCase):
+    def test_evidence_feedback_distinguishes_excess_count_from_wrong_id_type(self):
+        turns = [{'id': i} for i in range(1, 20)]
+        proposal = {'decision': 'propose', 'reason': 'test', 'habits': [
+            {'dimension': 'brevity', 'text': '自然收尾。', 'evidence_ids': list(range(1, 13))}]}
+        with self.assertRaisesRegex(ValueError, 'received 12'):
+            validate_proposal(proposal, [], turns)
+        proposal['habits'][0]['evidence_ids'] = ['1', '2']
+        with self.assertRaisesRegex(ValueError, 'integer turns'):
+            validate_proposal(proposal, [], turns)
+        proposal['habits'][0]['evidence_ids'] = [1, 2]
+        self.assertEqual(len(validate_proposal(proposal, [], turns)), 1)
+
     def test_hallucinated_and_repeated_evidence_rejected(self):
         for evidence in ([1, 999], [1, 1], [True, 2]):
             proposal = {'decision': 'propose', 'reason': 'test', 'habits': [{'dimension': 'tone', 'text': '自然说话。', 'evidence_ids': evidence}]}

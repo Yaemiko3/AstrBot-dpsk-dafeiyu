@@ -53,6 +53,10 @@ class PersonaRSI(Star):
         await self.engine.initialize()
         if self.store.get('evolution_schema') != 'unified-v1':
             self.store.put(evolution_schema='unified-v1', watermark=0, group_watermarks={}, last_attempt=0)
+        if self.store.get('workflow_revision') != 'correction-v1':
+            # Try pending evidence under the repaired flow on the next tick;
+            # do not reset sample cursors, versions, or an administrator's pause.
+            self.store.put(workflow_revision='correction-v1', last_attempt=0)
         bind(self)
         if self.config.get('group_learning_enabled', True):
             if self.store.get('group_learning_policy') != 'shared-human-v1':
