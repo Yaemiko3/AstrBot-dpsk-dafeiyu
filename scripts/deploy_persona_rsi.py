@@ -1,4 +1,4 @@
-"""Install this repository's Persona RSI plugin into an explicit local AstrBot core."""
+"""Install 学人鲸 from this repository into an explicit local AstrBot core."""
 import argparse
 from datetime import datetime
 import json

@@ -1,4 +1,4 @@
-# RSI 接入指南
+# 学人鲸接入指南
 
 本指南只配置自我迭代能力。先确认 AstrBot 已经能够正常收发消息并调用模型。
 
@@ -22,7 +22,7 @@ python scripts/deploy_persona_rsi.py --core "<AstrBot核心目录>" --enable --p
 
 | 配置项 | 用途 |
 | --- | --- |
-| `enabled` | 启用 RSI |
+| `enabled` | 启用学人鲸 |
 | `persona_id` | 机器人实际使用的目标人格 ID |
 | `provider_id` | 提案与回复回放使用的模型提供商 ID |
 | `review_provider_id` | 审查模型；留空复用上述模型 |

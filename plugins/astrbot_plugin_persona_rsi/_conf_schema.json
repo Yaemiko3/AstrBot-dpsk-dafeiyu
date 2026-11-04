@@ -1,5 +1,5 @@
 {
-  "enabled": {"description": "启用人格 RSI", "type": "bool", "default": false},
+  "enabled": {"description": "启用学人鲸（人格 RSI）", "type": "bool", "default": false},
   "persona_id": {"description": "迭代目标人格 ID", "type": "string", "default": "dafeiyu_custom"},
   "provider_id": {"description": "提案与回复对照模型", "type": "string", "default": "", "_special": "select_provider"},
   "review_provider_id": {"description": "独立审查模型，留空复用上述模型", "type": "string", "default": "", "_special": "select_provider"},

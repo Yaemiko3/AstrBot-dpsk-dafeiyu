@@ -1,1 +1,1 @@
-"""Persona RSI for AstrBot."""
+"""学人鲸：面向 AstrBot 的真人表达学习与自我迭代。"""
