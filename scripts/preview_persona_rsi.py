@@ -15,6 +15,7 @@ from astrbot_plugin_persona_rsi.storage import Store
 from astrbot_plugin_persona_rsi.policy import BEGIN, PLANNER, REVIEWER, JUDGE
 from astrbot_plugin_persona_rsi.group_learning import GroupFeed, GROUP_PLANNER, GROUP_REVIEWER, group_batch
 from astrbot_plugin_persona_rsi.unified import UNIFIED_PLANNER, UNIFIED_REVIEWER
+from astrbot_plugin_persona_rsi.expression import EXPRESSION_OBSERVER
 
 
 async def preview(args):
@@ -45,10 +46,10 @@ async def preview(args):
         raise ValueError('Need at least ten nonempty message pairs')
 
     def complete(system, user):
-        payload = {'model': provider['model'], 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}], 'max_tokens': 6500 if system == UNIFIED_PLANNER else 2600}
+        payload = {'model': provider['model'], 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}], 'max_tokens': 6500 if system in (UNIFIED_PLANNER, EXPRESSION_OBSERVER) else 2600}
         if 'api.deepseek.com' in source['api_base']:
             payload['thinking'] = {'type': 'disabled'}
-        if system in (PLANNER, REVIEWER, JUDGE, GROUP_PLANNER, GROUP_REVIEWER, UNIFIED_PLANNER, UNIFIED_REVIEWER):
+        if system in (PLANNER, REVIEWER, JUDGE, GROUP_PLANNER, GROUP_REVIEWER, UNIFIED_PLANNER, UNIFIED_REVIEWER, EXPRESSION_OBSERVER):
             payload['response_format'] = {'type': 'json_object'}
         request = urllib.request.Request(source['api_base'].rstrip('/') + '/chat/completions',
                                          data=json.dumps(payload).encode(),
@@ -104,6 +105,7 @@ async def preview(args):
             latest = store.history()[0]
             report = json.loads(latest['report'])
             print(json.dumps({'result': result, 'model_calls': calls,
+                              'attempt': report.get('attempt'), 'observation': report.get('observation'),
                               'reason': report.get('proposal', {}).get('reason'),
                               'review': report.get('review'),
                               'evidence_error': report.get('evidence_error'),

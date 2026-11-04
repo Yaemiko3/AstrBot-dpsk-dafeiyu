@@ -9,6 +9,7 @@ from .policy import BEGIN, END, CORE, PLANNER, REVIEWER, JUDGE, CASES, compose, 
 from .group_learning import group_batch
 from .runtime import BehaviorRuntime, append_context, bundle_hash
 from .unified import UNIFIED_PLANNER, UNIFIED_REVIEWER, validate_change, public_runtime
+from .expression import EXPRESSION_OBSERVER, expression_proposal
 
 
 class EvolutionEngine:
@@ -61,7 +62,10 @@ class EvolutionEngine:
                 return 'cooldown'
             turns = self.store.pending_turns()
             windows = group_batch(self.store)
-            use_groups = bool(windows) and (len(turns) < self.minimum_turns or self.store.get('last_source') != 'group')
+            # Prefer human expression; after two human batches allow one ready
+            # feedback batch so sustained group traffic cannot starve correction.
+            use_groups = bool(windows) and (len(turns) < self.minimum_turns
+                                           or self.store.get('expression_streak', 0) < 2)
             if not use_groups and len(turns) < self.minimum_turns:
                 return f'collecting:{len(turns)}/{self.minimum_turns}'
             if await self.read_persona() != self.store.revision()['prompt']:
@@ -76,9 +80,10 @@ class EvolutionEngine:
                     session = window['session']
                     marks[session] = max(marks.get(session, 0), window['end_id'])
                     reviewed[session] = time.time()
-                self.store.put(last_attempt=time.time(), last_source='group', group_watermarks=marks, group_reviewed_at=reviewed)
+                self.store.put(last_attempt=time.time(), last_source='group', group_watermarks=marks,
+                               group_reviewed_at=reviewed, expression_streak=self.store.get('expression_streak', 0) + 1)
             else:
-                self.store.put(last_attempt=time.time(), last_source='direct', watermark=turns[-1]['id'])
+                self.store.put(last_attempt=time.time(), last_source='direct', watermark=turns[-1]['id'], expression_streak=0)
             try:
                 operation = self._group_iteration(windows) if use_groups else self._iteration(turns)
                 result = await asyncio.wait_for(operation, timeout=720)
@@ -116,12 +121,19 @@ class EvolutionEngine:
             return 'paused_before_apply'
         active = self.store.revision()
         previous = [{k: v for k, v in h.items() if k != 'scope' and (source == 'group' or k != 'examples')} for h in active['habits']]
-        inputs = {'core': CORE, 'source': source, 'base_persona': self.store.get('base'),
-                  'previous_habits': previous, **public_runtime(active['bundle']),
-                  'group_windows' if source == 'group' else 'turns': training}
+        if source == 'group':
+            inputs = {'core': CORE, 'source': source, 'objective': 'learn_human_expression',
+                      'previous_habits': previous, 'group_windows': training}
+            planner = EXPRESSION_OBSERVER
+        else:
+            inputs = {'core': CORE, 'source': source, 'objective': 'auxiliary_feedback',
+                      'base_persona': self.store.get('base'), 'previous_habits': previous,
+                      **public_runtime(active['bundle']), 'turns': training}
+            planner = UNIFIED_PLANNER
         if correction is not None:
             inputs['correction'] = correction
-        proposal = await self._json(UNIFIED_PLANNER, inputs)
+        proposal = await self._json(planner, inputs)
+        observation = proposal if source == 'group' else None
         # Accept old persona-only draft files through the same executor.
         if 'habits' in proposal and 'changes' not in proposal:
             proposal = {**proposal, 'changes': {'persona': {'habits': proposal['habits']}}}
@@ -130,12 +142,18 @@ class EvolutionEngine:
                   'evidence': training, 'attempt': 2 if correction is not None else 1}
         if correction is not None:
             report['correction'] = correction
+        if observation is not None:
+            report['observation'] = observation
 
         async def correct(revision_id, feedback):
             return await self._unified_iteration(source, training, held_out, cases, correction={
-                'retry_of': revision_id, 'previous_proposal': proposal, 'feedback': feedback})
+                'retry_of': revision_id, 'previous_proposal': observation if observation is not None else proposal,
+                'feedback': feedback})
 
         try:
+            if observation is not None:
+                proposal = expression_proposal(observation, active)
+                report['proposal'] = proposal
             change = validate_change(proposal, active, source, training)
         except (ValueError, TypeError, SyntaxError) as exc:
             report['evidence_error'] = str(exc)
@@ -150,7 +168,7 @@ class EvolutionEngine:
                     'stage': 'group_observation',
                     'reason': '复核本次不修改的依据：旁观学习不要求机器人参与、被@、犯错或得到评价。'
                               '请分析真人之间如何回应抱怨、接梗、复读、收尾和控制回复长度，核对能否满足多人多场合的引用。'
-                              '已有原则但实际执行不佳时，可提出更具体的触发场景和停止条件，不只重复原则。'
+                              '真人表达本身是证据，不需要证明机器人原有原则执行失败。提炼适用情境、表达动作和停止条件，交给试用对照验证。'
                               '没有可迁移模式、证据不足或没有有效改法时仍返回 no_change，说明具体缺口；不要强行修改。'})
             return 'no_change'
         habits, bundle = change['habits'], change['bundle']
@@ -169,7 +187,8 @@ class EvolutionEngine:
             report['functional_tests'] = {'passed': False, 'error': type(exc).__name__ + ': ' + str(exc)}
             self.store.add_revision(active['id'], 'rejected_tests', candidate, habits, report, bundle=bundle)
             return 'rejected_tests'
-        review = await self._json(UNIFIED_REVIEWER, {**inputs, 'proposal': proposal, 'functional_tests': report['functional_tests']}, judge=True)
+        review = await self._json(UNIFIED_REVIEWER, {**inputs, 'base_persona': self.store.get('base'),
+                                  'proposal': proposal, 'functional_tests': report['functional_tests']}, judge=True)
         report['review'] = review
         if not all(review.get(k) is True for k in ('approve', 'core_preserved', 'evidence_supported')):
             rid = self.store.add_revision(active['id'], 'rejected_review', candidate, habits, report, bundle=bundle)

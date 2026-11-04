@@ -18,6 +18,7 @@ from .storage import Store
 from .policy import PLANNER, REVIEWER, JUDGE
 from .group_learning import GroupFeed, GROUP_PLANNER, GROUP_REVIEWER, group_batch
 from .unified import UNIFIED_PLANNER, UNIFIED_REVIEWER
+from .expression import EXPRESSION_OBSERVER
 from .runtime import append_context, bundle_hash, default_bundle
 from .passive import ObserveFilter, bind
 
@@ -59,12 +60,11 @@ class PersonaRSI(Star):
             self.store.put(workflow_revision='correction-v1', last_attempt=0)
         bind(self)
         if self.config.get('group_learning_enabled', True):
-            if self.store.get('group_learning_policy') != 'shared-human-v1':
+            if self.store.get('group_learning_policy') != 'expression-first-v1':
                 # Reassess historical windows once under the new shared objective;
                 # preserve the old reports and the active persona version.
-                checkpoint = {'group_learning_policy': 'shared-human-v1', 'group_watermarks': {}}
-                if self.store.get('last_source') == 'group':
-                    checkpoint['last_attempt'] = 0
+                checkpoint = {'group_learning_policy': 'expression-first-v1', 'group_watermarks': {},
+                              'expression_streak': 0, 'last_attempt': 0}
                 self.store.put(**checkpoint)
             self.group_feed = GroupFeed(self.store, root.parent / 'astrbot_plugin_livingmemory/conversations.db',
                                         self._allow_group, self.config.get('group_history_days', 7),
@@ -91,8 +91,8 @@ class PersonaRSI(Star):
         # so bounded background requests really receive JSON/output controls.
         if client is not None and getattr(client.base_url, 'host', '') == 'api.deepseek.com':
             options = {'model': model.get_model(), 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
-                       'max_tokens': 6500 if system == UNIFIED_PLANNER else 2600, 'extra_body': {'thinking': {'type': 'disabled'}}, 'timeout': 50}
-            if system in (PLANNER, REVIEWER, JUDGE, GROUP_PLANNER, GROUP_REVIEWER, UNIFIED_PLANNER, UNIFIED_REVIEWER):
+                       'max_tokens': 6500 if system in (UNIFIED_PLANNER, EXPRESSION_OBSERVER) else 2600, 'extra_body': {'thinking': {'type': 'disabled'}}, 'timeout': 50}
+            if system in (PLANNER, REVIEWER, JUDGE, GROUP_PLANNER, GROUP_REVIEWER, UNIFIED_PLANNER, UNIFIED_REVIEWER, EXPRESSION_OBSERVER):
                 options['response_format'] = {'type': 'json_object'}
             completion = await client.chat.completions.create(**options)
             choice = completion.choices[0]
@@ -100,7 +100,7 @@ class PersonaRSI(Star):
                 raise ValueError('Incomplete background model output')
             return choice.message.content
         response = await self.context.llm_generate(chat_provider_id=provider, system_prompt=system, prompt=user,
-                                                   max_tokens=6500 if system == UNIFIED_PLANNER else 2600)
+                                                   max_tokens=6500 if system in (UNIFIED_PLANNER, EXPRESSION_OBSERVER) else 2600)
         if response.role != 'assistant' or response.tools_call_name:
             raise ValueError('Unexpected evaluator response')
         return response.completion_text

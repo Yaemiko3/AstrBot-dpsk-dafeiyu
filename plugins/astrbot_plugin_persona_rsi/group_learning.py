@@ -173,6 +173,10 @@ def validate_group_proposal(proposal, previous, windows):
                     raise ValueError('Invalid human example')
             # There is only one source of truth: the actual cited messages.
             habit = {**habit, 'evidence_ids': sorted({e['window_id'] for e in examples})}
+            if not 3 <= len(habit['evidence_ids']) <= 8:
+                raise ValueError(f"Pattern {habit.get('dimension')} cites {len(habit['evidence_ids'])} windows; "
+                                 'each pattern separately needs 3 to 8 distinct window_id values, '
+                                 'at least 3 speakers and 3 independent occasions. Do not add counts across patterns.')
         normalized.append(habit)
     habits = normalized
 
@@ -211,6 +215,9 @@ def validate_group_proposal(proposal, previous, windows):
                 if stamp - last >= 300:
                     separated, last = separated + 1, stamp
             independent_occasions += separated
-        if independent_occasions < 3 or len(set().union(*speakers.values())) < 3:
-            raise ValueError('Not a multi-person, multi-occasion group habit')
+        speaker_count = len(set().union(*speakers.values()))
+        if independent_occasions < 3 or speaker_count < 3:
+            raise ValueError(f"Not a multi-person, multi-occasion group habit: {habit['dimension']} cites "
+                             f'{speaker_count} speakers and {independent_occasions} independent occasions; '
+                             'each pattern needs at least 3 of each. Same-group occasions must be 300 seconds apart.')
     return scope, [{**h, 'scope': '*'} for h in habits]

@@ -13,8 +13,10 @@ from astrbot_plugin_persona_rsi.policy import BEGIN, JUDGE, PLANNER, REVIEWER, c
 from astrbot_plugin_persona_rsi.storage import Store
 from test_persona_rsi import FakeModels
 from astrbot_plugin_persona_rsi.unified import UNIFIED_PLANNER, UNIFIED_REVIEWER
+from astrbot_plugin_persona_rsi.expression import EXPRESSION_OBSERVER, expression_proposal
 
-PLANNER = GROUP_PLANNER = UNIFIED_PLANNER
+PLANNER = UNIFIED_PLANNER
+GROUP_PLANNER = EXPRESSION_OBSERVER
 REVIEWER = GROUP_REVIEWER = UNIFIED_REVIEWER
 
 GROUP = 'qq:GroupMessage:one'
@@ -41,6 +43,14 @@ def proposal_for(windows, scope='*'):
     return {'decision': 'propose', 'scope': scope, 'reason': '多人在不同场合用短句接梗', 'habits': [
         {'dimension': 'banter', 'text': '多人围绕同一句话接龙时，顺势复读一次或稍作变化接梗；话题转走就接新话题。',
          'evidence_ids': [e['window_id'] for e in examples], 'examples': examples}]}
+
+
+def observation_for(windows):
+    habit = proposal_for(windows)['habits'][0]
+    return {'decision': 'propose', 'reason': '多人在不同场合顺势接话，可供试用', 'patterns': [
+        {'dimension': 'banter', 'situation': '多人围绕同一句话接龙时',
+         'response': '顺势复读一次或稍作变化接梗', 'ending': '话题转走就接新话题',
+         'examples': habit['examples']}]}
 
 
 class GroupTests(unittest.IsolatedAsyncioTestCase):
@@ -171,7 +181,7 @@ class GroupTests(unittest.IsolatedAsyncioTestCase):
             value = json.loads(user) if system in (GROUP_PLANNER, GROUP_REVIEWER, JUDGE) else None
             calls.append((system, user))
             if system == GROUP_PLANNER:
-                return json.dumps(proposal_for(value['group_windows']))
+                return json.dumps(observation_for(value['group_windows']))
             if system == GROUP_REVIEWER:
                 return json.dumps({'approve': True, 'core_preserved': True, 'evidence_supported': True})
             if system == JUDGE:
@@ -263,7 +273,7 @@ class GroupTests(unittest.IsolatedAsyncioTestCase):
                 drafts.append(value)
                 if 'correction' not in value:
                     return json.dumps({'decision': 'no_change', 'reason': '机器人未参与'})
-                return json.dumps(proposal_for(value['group_windows']))
+                return json.dumps(observation_for(value['group_windows']))
             return await model(system, user, judge)
         engine = EvolutionEngine(self.store, generate, read, write)
         await engine.initialize()
@@ -284,7 +294,7 @@ class GroupTests(unittest.IsolatedAsyncioTestCase):
         model.mode = 'regress'
         async def generate(system, user, judge=False):
             if system == GROUP_PLANNER:
-                return json.dumps(proposal_for(json.loads(user)['group_windows']))
+                return json.dumps(observation_for(json.loads(user)['group_windows']))
             if system == GROUP_REVIEWER:
                 return json.dumps({'approve': True, 'core_preserved': True, 'evidence_supported': True})
             return await model(system, user, judge)
@@ -299,6 +309,97 @@ class GroupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(report['replay']), 9)
         help_case = next(c for c in report['replay'] if c['case_id'] == 'help')
         self.assertIn('candidate', (help_case['x'], help_case['y']))
+
+    async def test_human_learning_takes_priority_and_keeps_direct_feedback_pending(self):
+        seed(self.store)
+        model = FakeModels()
+        live, observed, reviewed = 'base', [], []
+        async def read(): return live
+        async def write(value):
+            nonlocal live
+            live = value
+        async def generate(system, user, judge=False):
+            if system == EXPRESSION_OBSERVER:
+                observed.append(json.loads(user))
+                return json.dumps(observation_for(observed[-1]['group_windows']))
+            if system == UNIFIED_REVIEWER:
+                reviewed.append(json.loads(user))
+            return await model(system, user, judge)
+        engine = EvolutionEngine(self.store, generate, read, write, minimum_turns=10)
+        await engine.initialize()
+        self.store.put(last_source='group')
+        for i in range(10):
+            self.store.record(str(i), GROUP, 'human', 'a question', 'a reply')
+        initial_bundle = self.store.revision()['bundle']
+        self.assertTrue((await engine.evolve(force=True)).startswith('activated:'))
+        self.assertEqual(self.store.get('last_source'), 'group')
+        self.assertEqual(len(self.store.pending_turns()), 10)
+        self.assertEqual(observed[0]['objective'], 'learn_human_expression')
+        for key in ('base_persona', 'turns', 'parameter_schema', 'behavior_source'):
+            self.assertNotIn(key, observed[0])
+        self.assertEqual(reviewed[0]['base_persona'], 'base')
+        report = self.store.revision()['report']
+        self.assertIn('patterns', report['observation'])
+        self.assertEqual(report['targets'], ['persona'])
+        self.assertEqual(self.store.revision()['bundle'], initial_bundle)
+        # Once this human batch has been consumed, direct feedback remains usable.
+        await engine.evolve(force=True)
+        self.assertEqual(self.store.get('last_source'), 'direct')
+        self.assertEqual(len(self.store.pending_turns()), 0)
+
+    async def test_auxiliary_feedback_is_not_starved_after_two_human_batches(self):
+        seed(self.store)
+        model = FakeModels()
+        model.mode = 'no_change'
+        async def read(): return 'base'
+        async def write(value): self.fail('No-change feedback must not write')
+        engine = EvolutionEngine(self.store, model, read, write, minimum_turns=10)
+        await engine.initialize()
+        self.store.put(expression_streak=2)
+        for i in range(10):
+            self.store.record(str(i), GROUP, 'human', 'input', 'reply')
+        self.assertEqual(await engine.evolve(force=True), 'no_change')
+        self.assertEqual(self.store.get('last_source'), 'direct')
+        self.assertEqual(self.store.get('expression_streak'), 0)
+        self.assertTrue(group_batch(self.store))
+
+    async def test_observation_compiles_into_habit_without_overwriting_other_dimensions(self):
+        seed(self.store)
+        active = {'habits': [{'dimension': 'tone', 'text': '自然表达', 'evidence_ids': [1, 2]}]}
+        original = json.loads(json.dumps(active))
+        observation = observation_for(group_batch(self.store))
+        compiled = expression_proposal(observation, active)
+        habits = compiled['changes']['persona']['habits']
+        self.assertEqual(habits[0], original['habits'][0])
+        self.assertEqual(active, original)
+        self.assertIn('接龙时', habits[1]['text'])
+        self.assertIn('复读', habits[1]['text'])
+        self.assertIn('话题转走', habits[1]['text'])
+        # Replacing the same dimension remains one habit, not an appended duplicate.
+        replaced = expression_proposal(observation, {'habits': habits})
+        self.assertEqual(len(replaced['changes']['persona']['habits']), 2)
+
+    async def test_observation_needs_specific_situation_action_ending_and_real_citations(self):
+        seed(self.store)
+        windows = group_batch(self.store)
+        observation = observation_for(windows)
+        observation['patterns'][0]['ending'] = ''
+        with self.assertRaisesRegex(ValueError, 'nonempty'):
+            expression_proposal(observation, {'habits': []})
+        observation = observation_for(windows)
+        observation['patterns'][0]['examples'][0]['message_id'] = 999999
+        proposal = expression_proposal(observation, {'habits': []})
+        with self.assertRaises(ValueError):
+            validate_group_proposal({**proposal, 'habits': proposal['changes']['persona']['habits'], 'scope': '*'}, [], windows)
+
+    async def test_expression_feedback_identifies_each_patterns_window_shortage(self):
+        seed(self.store)
+        windows = group_batch(self.store)
+        p = proposal_for(windows)
+        p['habits'][0]['examples'] = [{'window_id': windows[0]['id'], 'message_id': m['id']}
+                                     for m in windows[0]['messages']]
+        with self.assertRaisesRegex(ValueError, 'banter cites 1 windows'):
+            validate_group_proposal(p, [], windows)
 
 
 if __name__ == '__main__':
