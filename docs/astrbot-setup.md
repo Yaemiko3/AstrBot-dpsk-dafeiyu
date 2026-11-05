@@ -47,6 +47,8 @@ python scripts/deploy_persona_rsi.py --core "<AstrBot核心目录>" --enable --p
 管理员发送 `/prsi status`，检查是否启用、样本是否增长。达到样本和间隔条件后，后台会自动尝试一次改进。
 
 - `/prsi history`：查看提案及其采用或拒绝原因。
+
+新版本通过评估后会先实际试用；`/prsi status` 会显示新版回复的采集进度。累计20轮后，后台结合真实互动决定保留、微调、继续观察或回退，再恢复后续学习。
 - `/prsi habits`：查看生效的人格习惯。
 - `/prsi runtime`：查看生效的参数与行为代码版本。
 - `/prsi run`：立即尝试评估，仍需足够样本。

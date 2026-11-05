@@ -188,6 +188,7 @@ def validate_group_proposal(proposal, previous, windows):
     validate_proposal({**proposal, 'habits': [plain(h) for h in habits]}, [plain(h) for h in local_old], windows)
     indexed = {w['id']: w for w in windows}
     old_by_dim = {h['dimension']: h for h in local_old}
+    reference_errors = []
     for habit in habits:
         if habit == old_by_dim.get(habit['dimension']):
             continue
@@ -195,17 +196,30 @@ def validate_group_proposal(proposal, previous, windows):
         if not isinstance(examples, list) or not 3 <= len(examples) <= 24:
             raise ValueError('Need supporting human replies')
         used, speakers, occasions = set(), {}, {}
+        errors = []
         for example in examples:
             if not isinstance(example, dict) or set(example) != {'window_id', 'message_id'} or any(type(v) is not int for v in example.values()):
                 raise ValueError('Invalid human example')
             wid, mid = example['window_id'], example['message_id']
             window = indexed.get(wid)
             message = next((m for m in window['messages'] if m['id'] == mid), None) if window else None
-            if message is None or (wid, mid) in used:
-                raise ValueError('Human evidence is missing, duplicated or out of scope')
+            if message is None:
+                actual = [w['id'] for w in windows if any(m['id'] == mid for m in w['messages'])]
+                if actual:
+                    detail = f'message_id={mid} belongs to window_id={actual}, not window_id={wid}'
+                else:
+                    detail = f'message_id={mid} is absent from the supplied training messages'
+                errors.append(f"Pattern {habit['dimension']}: {detail}")
+                continue
+            if (wid, mid) in used:
+                errors.append(f"Pattern {habit['dimension']}: duplicate reference window_id={wid}, message_id={mid}")
+                continue
             used.add((wid, mid))
             speakers.setdefault(window['session'], set()).add(message['speaker'])
             occasions.setdefault(window['session'], {})[wid] = window['created']
+        if errors:
+            reference_errors.extend(errors)
+            continue
         if {w for w, _ in used} != set(habit['evidence_ids']):
             raise ValueError('Evidence ids must match examples')
         independent_occasions = 0
@@ -220,4 +234,7 @@ def validate_group_proposal(proposal, previous, windows):
             raise ValueError(f"Not a multi-person, multi-occasion group habit: {habit['dimension']} cites "
                              f'{speaker_count} speakers and {independent_occasions} independent occasions; '
                              'each pattern needs at least 3 of each. Same-group occasions must be 300 seconds apart.')
+    if reference_errors:
+        raise ValueError('; '.join(reference_errors) +
+                         '. Use reference_index to select existing pairs, then recheck their contexts.')
     return scope, [{**h, 'scope': '*'} for h in habits]

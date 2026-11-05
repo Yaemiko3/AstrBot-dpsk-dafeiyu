@@ -1,20 +1,23 @@
 """Evidence -> candidate -> independent review -> blind replay -> version activation."""
 import asyncio
+import copy
 import json
 import random
 import time
 import uuid
 
-from .policy import BEGIN, END, CORE, PLANNER, REVIEWER, JUDGE, CASES, compose, parse_json, validate_proposal, accept_scores
+from .policy import BEGIN, END, CORE, PLANNER, REVIEWER, JUDGE, CASES, compose, parse_json, validate_proposal, accept_scores, score_summary
 from .group_learning import group_batch
 from .runtime import BehaviorRuntime, append_context, bundle_hash
 from .unified import UNIFIED_PLANNER, UNIFIED_REVIEWER, validate_change, public_runtime
 from .expression import EXPRESSION_OBSERVER, expression_proposal
+from .trial import TRIAL_REVIEWER, TRIAL_TURNS, validate_trial_review
 
 
 class EvolutionEngine:
-    def __init__(self, store, generate, read_persona, write_persona, minimum_turns=40, cooldown_hours=6):
+    def __init__(self, store, generate, read_persona, write_persona, minimum_turns=40, cooldown_hours=6, core_rules=None):
         self.store = store
+        self.core = (core_rules or '').strip() or CORE
         self.generate = generate  # async (system, user, judge=False) -> text
         self.read_persona = read_persona
         self.write_persona = write_persona
@@ -48,7 +51,29 @@ class EvolutionEngine:
             self.store.put(last_result='external_edit: adopt explicitly before evolving')
 
     async def _json(self, system, value, judge=False):
-        return parse_json(await asyncio.wait_for(self.generate(system, json.dumps(value, ensure_ascii=False), judge), timeout=60))
+        payload = value
+        diagnostic = None
+        for attempt in range(2):
+            raw = await asyncio.wait_for(self.generate(system, json.dumps(payload, ensure_ascii=False), judge), timeout=60)
+            try:
+                result = parse_json(raw)
+            except ValueError as exc:
+                diagnostic = {'stage': system.splitlines()[0][:100], 'attempt': attempt + 1,
+                              'error': str(exc), 'characters': len(raw) if isinstance(raw, str) else 0,
+                              'created': time.time(), 'recovered': False}
+                self.store.put(last_json_error=diagnostic)
+                if attempt:
+                    raise
+                # Regenerate in the same stage with the same evidence. Never
+                # guess missing JSON fields or turn malformed output into approval.
+                payload = {**value, 'format_feedback': {
+                    'error': str(exc),
+                    'instruction': '上次输出不是完整 JSON 对象。请按原任务重新输出一个完整 JSON 对象；不加说明或 Markdown，字符串内双引号须转义，理由简短。',
+                    'previous_output': raw[:12000] if isinstance(raw, str) else ''}}
+            else:
+                if diagnostic is not None:
+                    self.store.put(last_json_error={**diagnostic, 'recovered': True})
+                return result
 
     async def evolve(self, force=False):
         if self.lock.locked():
@@ -58,8 +83,30 @@ class EvolutionEngine:
                 await self.initialize()
             if self.store.get('paused', False):
                 return 'paused'
+            if await self.read_persona() != self.store.revision()['prompt']:
+                self.store.put(last_result='external_edit')
+                return 'external_edit'
+            if self.store.get('reassessment_pending', False):
+                self.store.put(reassessment_pending=False)
+                result = await self._reconsider_replay()
+                if result:
+                    self.store.put(last_result=result, last_attempt=time.time())
+                    return result
             if not force and time.time() - self.store.get('last_attempt', 0) < self.cooldown:
                 return 'cooldown'
+            trial = self.store.get('trial')
+            if trial and trial['revision'] == self.store.get('active') and trial['state'] == 'observing':
+                turns = self.store.trial_turns(trial, TRIAL_TURNS)
+                if len(turns) < TRIAL_TURNS:
+                    return f'trial_collecting:{len(turns)}/{TRIAL_TURNS}'
+                self.store.put(last_attempt=time.time())
+                try:
+                    result = await asyncio.wait_for(self._review_trial(trial, turns), timeout=720)
+                except Exception as exc:
+                    self.store.put(last_result='failed_trial:' + type(exc).__name__)
+                    raise
+                self.store.put(last_result=result)
+                return result
             turns = self.store.pending_turns()
             windows = group_batch(self.store)
             # Prefer human expression; after two human batches allow one ready
@@ -93,7 +140,7 @@ class EvolutionEngine:
             self.store.put(last_result=result)
             return result
 
-    async def _iteration(self, turns):
+    async def _iteration(self, turns, feedback=None):
         training, held_out = turns[:-2], turns[-2:]
         cases = list(CASES)
         for index, turn in enumerate(held_out):
@@ -104,7 +151,7 @@ class EvolutionEngine:
             if trace.get('request') and isinstance(trace.get('messages'), list):
                 case.update(request=trace['request'], messages=trace['messages'])
             cases.append(case)
-        return await self._unified_iteration('direct', training, held_out, cases)
+        return await self._unified_iteration('direct', training, held_out, cases, feedback=feedback)
 
     async def _group_iteration(self, windows):
         training, held_out = windows[:-2], windows[-2:]
@@ -112,24 +159,28 @@ class EvolutionEngine:
         for index, window in enumerate(held_out):
             context = '\n'.join(m['speaker'] + '：' + m['text'] for m in window['messages'][:-1])
             cases.append({'id': 'group_holdout_' + str(index),
-                          'input': '以下是群友之间刚发生的交流：\n' + context + '\n现在轮到大肥鱼接一句，请按自己的身份自然接话。',
+                          'input': '以下是群友之间刚发生的交流：\n' + context + '\n现在轮到你接一句，请按自己的身份自然接话。',
                           'human_reference': window['messages'][-1]['text']})
         return await self._unified_iteration('group', training, held_out, cases)
 
-    async def _unified_iteration(self, source, training, held_out, cases, correction=None):
+    async def _unified_iteration(self, source, training, held_out, cases, correction=None, feedback=None):
         if self.store.get('paused', False):
             return 'paused_before_apply'
         active = self.store.revision()
         previous = [{k: v for k, v in h.items() if k != 'scope' and (source == 'group' or k != 'examples')} for h in active['habits']]
         if source == 'group':
-            inputs = {'core': CORE, 'source': source, 'objective': 'learn_human_expression',
-                      'previous_habits': previous, 'group_windows': training}
+            inputs = {'core': self.core, 'source': source, 'objective': 'learn_human_expression',
+                      'previous_habits': previous, 'group_windows': training,
+                      'reference_index': [{'window_id': w['id'], 'message_ids': [m['id'] for m in w['messages']]}
+                                          for w in training]}
             planner = EXPRESSION_OBSERVER
         else:
-            inputs = {'core': CORE, 'source': source, 'objective': 'auxiliary_feedback',
+            inputs = {'core': self.core, 'source': source, 'objective': 'auxiliary_feedback',
                       'base_persona': self.store.get('base'), 'previous_habits': previous,
                       **public_runtime(active['bundle']), 'turns': training}
             planner = UNIFIED_PLANNER
+            if feedback is not None:
+                inputs['trial_feedback'] = feedback
         if correction is not None:
             inputs['correction'] = correction
         proposal = await self._json(planner, inputs)
@@ -148,7 +199,7 @@ class EvolutionEngine:
         async def correct(revision_id, feedback):
             return await self._unified_iteration(source, training, held_out, cases, correction={
                 'retry_of': revision_id, 'previous_proposal': observation if observation is not None else proposal,
-                'feedback': feedback})
+                'feedback': feedback}, feedback=inputs.get('trial_feedback'))
 
         try:
             if observation is not None:
@@ -172,7 +223,7 @@ class EvolutionEngine:
                               '没有可迁移模式、证据不足或没有有效改法时仍返回 no_change，说明具体缺口；不要强行修改。'})
             return 'no_change'
         habits, bundle = change['habits'], change['bundle']
-        candidate = compose(self.store.get('base'), habits)
+        candidate = compose(self.store.get('base'), habits, self.core)
         report['targets'] = change['targets']
         workspace = self.store.directory / 'candidates' / uuid.uuid4().hex
         workspace.mkdir(parents=True)
@@ -234,9 +285,10 @@ class EvolutionEngine:
                 replay[-1]['human_reference'] = case['human_reference']
             if 'evaluation_focus' in case:
                 replay[-1]['evaluation_focus'] = case['evaluation_focus']
-        judgement = await self._json(JUDGE, {'core': CORE, 'cases': replay}, judge=True)
+        judgement = await self._json(JUDGE, {'core': self.core, 'cases': replay}, judge=True)
         report.update(replay=replay, candidate_is_x=mapping, judgement=judgement)
-        if not accept_scores(judgement, mapping):
+        report['adoption'] = score_summary(judgement, mapping)
+        if not report['adoption']['accepted']:
             self.store.add_revision(active['id'], 'rejected_replay', candidate, habits, report, bundle=bundle)
             return 'rejected_replay'
         if self.store.get('paused', False):
@@ -251,6 +303,9 @@ class EvolutionEngine:
         if await self.read_persona() != expected['prompt']:
             self.store.add_revision(expected['id'], 'external_edit', prompt, habits, report, bundle=bundle)
             return 'external_edit'
+        if report.get('adoption', {}).get('accepted'):
+            report = {**report, 'trial': {'state': 'observing', 'after_turn_id': self.store.latest_turn_id(),
+                                         'required_turns': TRIAL_TURNS}}
         rid = self.store.add_revision(expected['id'], 'applying', prompt, habits, report, base=base, bundle=bundle)
         self.store.put(applying=rid)
         # Keep applying on cancellation/failure: startup reconciles a possible successful write.
@@ -259,6 +314,64 @@ class EvolutionEngine:
             raise RuntimeError('Persona write was not confirmed')
         self.store.activate(rid)
         return f'activated:{rid}'
+
+    async def _reconsider_replay(self):
+        """Once per policy upgrade, reconsider an eligible unchanged-base draft."""
+        if self.store.get('trial'):
+            return None
+        active = self.store.revision()
+        for row in self.store.history(50):
+            if row['status'] != 'rejected_replay' or row['parent'] != active['id']:
+                continue
+            candidate = self.store.revision(row['id'])
+            report = copy.deepcopy(candidate['report'])
+            if candidate['base'] != active['base'] or not report.get('functional_tests', {}).get('passed'):
+                continue
+            if not all(report.get('review', {}).get(k) is True for k in ('approve', 'core_preserved', 'evidence_supported')):
+                continue
+            try:
+                eligible = accept_scores(report['judgement'], report['candidate_is_x'])
+            except (KeyError, ValueError, TypeError):
+                continue
+            if not eligible or not report.get('replay'):
+                continue
+            report['reassesses'] = row['id']
+            report['previous_judgement'] = report['judgement']
+            report['judgement'] = await self._json(JUDGE, {'core': self.core, 'cases': report['replay']}, judge=True)
+            report['adoption'] = score_summary(report['judgement'], report['candidate_is_x'])
+            if not report['adoption']['accepted']:
+                self.store.add_revision(active['id'], 'rejected_replay', candidate['prompt'], candidate['habits'],
+                                        report, bundle=candidate['bundle'])
+                return 'rejected_replay'
+            if self.store.get('paused', False):
+                return 'paused_before_apply'
+            return await self._activate(candidate['prompt'], candidate['habits'], report, active, bundle=candidate['bundle'])
+        return None
+
+    async def _review_trial(self, trial, turns):
+        active = self.store.revision()
+        # The final two turns remain unseen by the feedback/planning models.
+        training = turns[:-2]
+        review = await self._json(TRIAL_REVIEWER, {'core': self.core, 'habits': active['habits'],
+                                  'parameters': active['bundle']['parameters'], 'turns': training}, judge=True)
+        decision = validate_trial_review(review, training)
+        if self.store.get('paused', False):
+            return 'paused_before_apply'
+        if await self.read_persona() != active['prompt']:
+            return 'external_edit'
+        trial = {**trial, 'after_turn_id': turns[-1]['id'],
+                 'state': 'kept' if decision == 'keep' else 'observing', 'last_review': review}
+        self.store.record_trial_review(trial, {**review, 'created': time.time(),
+                                              'sample_ids': [t['id'] for t in training]})
+        self.store.put(watermark=max(self.store.get('watermark', 0), turns[-1]['id']))
+        if decision == 'rollback':
+            previous = self.store.revision(active['parent'])
+            return await self._activate(previous['prompt'], previous['habits'],
+                                        {'kind': 'trial_feedback_rollback', 'review': review, 'target': previous['id']},
+                                        active, base=previous['base'], bundle=previous['bundle'])
+        if decision == 'adjust':
+            return await self._iteration(turns, feedback=review)
+        return 'trial_kept' if decision == 'keep' else 'trial_observing'
 
     async def rollback(self):
         async with self.lock:

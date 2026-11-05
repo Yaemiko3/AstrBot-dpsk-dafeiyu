@@ -97,9 +97,33 @@ class Store:
         with self.db:
             self.db.execute("UPDATE revisions SET status='archived' WHERE status='active'")
             self.db.execute("UPDATE revisions SET status='active' WHERE id=?", (rid,))
-            for key, value in {'active': rid, 'base': self.revision(rid)['base'], 'applying': None, 'last_result': 'activated:' + str(rid)}.items():
+            revision = self.revision(rid)
+            trial = revision['report'].get('trial')
+            if trial:
+                trial = {**trial, 'revision': rid, 'parent': revision['parent']}
+            for key, value in {'active': rid, 'base': revision['base'], 'applying': None,
+                               'last_result': 'activated:' + str(rid), 'trial': trial}.items():
                 self.db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)', (key, json.dumps(value)))
         self.export()
+
+    def latest_turn_id(self):
+        return self.db.execute('SELECT coalesce(max(id),0) FROM turns').fetchone()[0]
+
+    def trial_turns(self, trial, limit=20):
+        rows = self.db.execute("SELECT * FROM turns WHERE id>? AND json_extract(trace,'$.revision')=? ORDER BY id LIMIT ?",
+                               (trial['after_turn_id'], trial['revision'], limit))
+        turns = [dict(r) for r in rows]
+        for turn in turns:
+            turn['trace'] = json.loads(turn['trace'])
+        return turns
+
+    def record_trial_review(self, trial, review):
+        report = self.revision(trial['revision'])['report']
+        report.setdefault('trial_reviews', []).append(review)
+        with self.db:
+            self.db.execute('UPDATE revisions SET report=? WHERE id=?',
+                            (json.dumps(report, ensure_ascii=False), trial['revision']))
+            self.db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)', ('trial', json.dumps(trial, ensure_ascii=False)))
 
     def export(self):
         active = self.revision()

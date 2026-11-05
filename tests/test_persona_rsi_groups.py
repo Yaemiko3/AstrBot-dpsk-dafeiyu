@@ -135,6 +135,51 @@ class GroupTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             validate_group_proposal(p, [], windows)
 
+    async def test_all_wrong_window_pairs_are_reported_without_remapping(self):
+        seed(self.store)
+        windows = group_batch(self.store)
+        p = proposal_for(windows)
+        wrong_a = windows[3]['messages'][0]['id']
+        wrong_b = windows[4]['messages'][0]['id']
+        p['habits'][0]['examples'][0]['message_id'] = wrong_a
+        p['habits'][0]['examples'][1]['message_id'] = wrong_b
+        with self.assertRaises(ValueError) as error:
+            validate_group_proposal(p, [], windows)
+        self.assertIn(f'message_id={wrong_a} belongs to window_id=[{windows[3]["id"]}]', str(error.exception))
+        self.assertIn(f'message_id={wrong_b} belongs to window_id=[{windows[4]["id"]}]', str(error.exception))
+        self.assertEqual(p['habits'][0]['examples'][0]['window_id'], windows[0]['id'])
+
+    async def test_reference_correction_reaches_review_and_never_sees_holdout(self):
+        seed(self.store)
+        live = 'base'
+        drafts = []
+        model = FakeModels()
+        async def read(): return live
+        async def write(value):
+            nonlocal live
+            live = value
+        async def generate(system, user, judge=False):
+            if system == GROUP_PLANNER:
+                value = json.loads(user)
+                drafts.append(value)
+                observation = observation_for(value['group_windows'])
+                if 'correction' not in value:
+                    observation['patterns'][0]['examples'][0]['message_id'] = value['group_windows'][3]['messages'][0]['id']
+                else:
+                    self.assertIn('belongs to window_id', value['correction']['feedback']['reason'])
+                return json.dumps(observation)
+            return await model(system, user, judge)
+        engine = EvolutionEngine(self.store, generate, read, write)
+        await engine.initialize()
+        self.assertTrue((await engine.evolve(force=True)).startswith('activated:'))
+        self.assertEqual(len(drafts), 2)
+        report = self.store.revision()['report']
+        for draft in drafts:
+            indexed = {r['window_id'] for r in draft['reference_index']}
+            self.assertFalse(indexed & set(report['held_out_ids']))
+            self.assertEqual(indexed, set(report['evidence_ids']))
+        self.assertTrue(report['review']['approve'])
+
     async def test_window_ids_are_derived_from_verified_message_citations(self):
         seed(self.store)
         windows = group_batch(self.store)
@@ -342,7 +387,8 @@ class GroupTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('patterns', report['observation'])
         self.assertEqual(report['targets'], ['persona'])
         self.assertEqual(self.store.revision()['bundle'], initial_bundle)
-        # Once this human batch has been consumed, direct feedback remains usable.
+        # After the trial is kept, direct feedback remains usable.
+        self.store.put(trial={**self.store.get('trial'), 'state': 'kept'})
         await engine.evolve(force=True)
         self.assertEqual(self.store.get('last_source'), 'direct')
         self.assertEqual(len(self.store.pending_turns()), 0)

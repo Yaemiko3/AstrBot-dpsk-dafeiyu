@@ -15,10 +15,11 @@ from astrbot.core.message.message_event_result import ResultContentType
 
 from .engine import EvolutionEngine
 from .storage import Store
-from .policy import PLANNER, REVIEWER, JUDGE
+from .policy import PLANNER, REVIEWER, JUDGE, ADOPTION_POLICY
 from .group_learning import GroupFeed, GROUP_PLANNER, GROUP_REVIEWER, group_batch
 from .unified import UNIFIED_PLANNER, UNIFIED_REVIEWER
 from .expression import EXPRESSION_OBSERVER
+from .trial import TRIAL_REVIEWER, TRIAL_TURNS
 from .runtime import append_context, bundle_hash, default_bundle
 from .passive import ObserveFilter, bind
 
@@ -50,8 +51,11 @@ class PersonaRSI(Star):
         suffix = hashlib.sha256(self.persona_id.encode()).hexdigest()[:16]
         self.store = Store(root / suffix)
         self.engine = EvolutionEngine(self.store, self._generate, self._read, self._write,
-                                      self.config.get('minimum_turns', 40), self.config.get('cooldown_hours', 6))
+                                      self.config.get('minimum_turns', 40), self.config.get('cooldown_hours', 6),
+                                      core_rules=self.config.get('core_rules'))
         await self.engine.initialize()
+        if self.store.get('adoption_policy') != ADOPTION_POLICY:
+            self.store.put(adoption_policy=ADOPTION_POLICY, reassessment_pending=True)
         if self.store.get('evolution_schema') != 'unified-v1':
             self.store.put(evolution_schema='unified-v1', watermark=0, group_watermarks={}, last_attempt=0)
         if self.store.get('workflow_revision') != 'correction-v1':
@@ -92,7 +96,7 @@ class PersonaRSI(Star):
         if client is not None and getattr(client.base_url, 'host', '') == 'api.deepseek.com':
             options = {'model': model.get_model(), 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
                        'max_tokens': 6500 if system in (UNIFIED_PLANNER, EXPRESSION_OBSERVER) else 2600, 'extra_body': {'thinking': {'type': 'disabled'}}, 'timeout': 50}
-            if system in (PLANNER, REVIEWER, JUDGE, GROUP_PLANNER, GROUP_REVIEWER, UNIFIED_PLANNER, UNIFIED_REVIEWER, EXPRESSION_OBSERVER):
+            if system in (PLANNER, REVIEWER, JUDGE, GROUP_PLANNER, GROUP_REVIEWER, UNIFIED_PLANNER, UNIFIED_REVIEWER, EXPRESSION_OBSERVER, TRIAL_REVIEWER):
                 options['response_format'] = {'type': 'json_object'}
             completion = await client.chat.completions.create(**options)
             choice = completion.choices[0]
@@ -143,7 +147,7 @@ class PersonaRSI(Star):
                 try:
                     await self._sync_groups()
                     result = await self.engine.evolve()
-                    if not result.startswith(('collecting:', 'cooldown', 'paused')):
+                    if not result.startswith(('collecting:', 'trial_collecting:', 'cooldown', 'paused')):
                         logger.info('[PersonaRSI] iteration: %s', result)
                 except Exception as exc:
                     logger.warning('[PersonaRSI] iteration failed: %s', type(exc).__name__)
@@ -297,8 +301,14 @@ class PersonaRSI(Star):
         if not self.engine:
             return '人格 RSI 未启用，请先配置模型并启用插件。'
         active = self.store.revision()
+        trial = self.store.get('trial')
+        trial_status = '无待复核试用'
+        if trial and trial['revision'] == active['id']:
+            trial_status = ('已保留' if trial['state'] == 'kept' else
+                            f'试用中 {len(self.store.trial_turns(trial, TRIAL_TURNS))}/{TRIAL_TURNS} 轮')
         return (f'人格：{self.persona_id}\n版本：{active["id"]}，习惯 {len(active["habits"])} 条\n'
                 f'状态：{"暂停" if self.store.get("paused") else "运行"}\n'
+                f'实际反馈复核：{trial_status}\n'
                 f'统一改进：人格 / 参数 / 行为代码，代码版本 {bundle_hash(active["bundle"])}\n'
                 f'新对话：{len(self.store.pending_turns())}/{self.engine.minimum_turns}\n'
                 f'群聊学习：{self.store.get("group_source_status", "disabled")}，已导入 {self.store.group_count()} 条真人候选消息，待评估 {len(group_batch(self.store))} 个片段\n'

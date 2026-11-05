@@ -1,6 +1,7 @@
 {
   "enabled": {"description": "启用学人鲸（人格 RSI）", "type": "bool", "default": false},
   "persona_id": {"description": "迭代目标人格 ID", "type": "string", "default": "dafeiyu_custom"},
+  "core_rules": {"description": "固定核心设定；留空沿用大肥鱼核心，其他角色请填写自身设定", "type": "text", "default": ""},
   "provider_id": {"description": "提案与回复对照模型", "type": "string", "default": "", "_special": "select_provider"},
   "review_provider_id": {"description": "独立审查模型，留空复用上述模型", "type": "string", "default": "", "_special": "select_provider"},
   "minimum_turns": {"description": "每轮最少新对话数（10～60）", "type": "int", "default": 40},

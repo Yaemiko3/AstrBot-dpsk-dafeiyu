@@ -16,6 +16,7 @@ from astrbot_plugin_persona_rsi.policy import BEGIN, PLANNER, REVIEWER, JUDGE
 from astrbot_plugin_persona_rsi.group_learning import GroupFeed, GROUP_PLANNER, GROUP_REVIEWER, group_batch
 from astrbot_plugin_persona_rsi.unified import UNIFIED_PLANNER, UNIFIED_REVIEWER
 from astrbot_plugin_persona_rsi.expression import EXPRESSION_OBSERVER
+from astrbot_plugin_persona_rsi.trial import TRIAL_REVIEWER
 
 
 async def preview(args):
@@ -49,7 +50,7 @@ async def preview(args):
         payload = {'model': provider['model'], 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}], 'max_tokens': 6500 if system in (UNIFIED_PLANNER, EXPRESSION_OBSERVER) else 2600}
         if 'api.deepseek.com' in source['api_base']:
             payload['thinking'] = {'type': 'disabled'}
-        if system in (PLANNER, REVIEWER, JUDGE, GROUP_PLANNER, GROUP_REVIEWER, UNIFIED_PLANNER, UNIFIED_REVIEWER, EXPRESSION_OBSERVER):
+        if system in (PLANNER, REVIEWER, JUDGE, GROUP_PLANNER, GROUP_REVIEWER, UNIFIED_PLANNER, UNIFIED_REVIEWER, EXPRESSION_OBSERVER, TRIAL_REVIEWER):
             payload['response_format'] = {'type': 'json_object'}
         request = urllib.request.Request(source['api_base'].rstrip('/') + '/chat/completions',
                                          data=json.dumps(payload).encode(),
@@ -91,7 +92,9 @@ async def preview(args):
                     store.put(active=rid, base=base)
                 finally:
                     state.close()
-            engine = EvolutionEngine(store, generate, read, write, minimum_turns=len(pairs))
+            config_path = core / 'data/config/astrbot_plugin_persona_rsi_config.json'
+            rsi_config = json.loads(config_path.read_text(encoding='utf-8-sig')) if config_path.exists() else {}
+            engine = EvolutionEngine(store, generate, read, write, minimum_turns=len(pairs), core_rules=rsi_config.get('core_rules'))
             await engine.initialize()
             if args.group_session:
                 async def allow(session, platform): return session in args.group_session
@@ -112,6 +115,7 @@ async def preview(args):
                               'targets': report.get('targets', []),
                               'functional_tests_passed': report.get('functional_tests', {}).get('passed'),
                               'judgement': report.get('judgement'),
+                              'adoption': report.get('adoption'), 'trial': store.get('trial'),
                               'candidate_habits': report.get('proposal', {}).get('changes', {}).get('persona', {}).get('habits', store.revision(latest['id'])['habits']),
                               'candidate_parameters': report.get('proposal', {}).get('changes', {}).get('parameters'),
                               'live_persona_modified': False, 'live_runtime_modified': False}, ensure_ascii=False, indent=2))
